@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -416,8 +417,17 @@ func (r HelmOperatorReconciler) updateResource(ctx context.Context, o client.Obj
 
 func (r HelmOperatorReconciler) updateResourceStatus(ctx context.Context, o *unstructured.Unstructured, status *types.HelmAppStatus) error {
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		o.Object["status"] = status
-		return r.Client.Status().Update(ctx, o)
+		if o.GetKind() == "ConfigMap" {
+			jsonStatus, err := json.Marshal(status.Conditions)
+			if err != nil {
+				return err
+			}
+			o.SetAnnotations(map[string]string{"deploymentStatus": string(jsonStatus)})
+			return r.Client.Update(ctx, o)
+		} else {
+			o.Object["status"] = status
+			return r.Client.Status().Update(ctx, o)
+		}
 	})
 }
 

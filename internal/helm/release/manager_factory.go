@@ -16,6 +16,7 @@ package release
 
 import (
 	"fmt"
+	"gopkg.in/yaml.v3"
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
@@ -82,9 +83,30 @@ func (f managerFactory) NewManager(cr *unstructured.Unstructured, overrideValues
 		return nil, fmt.Errorf("failed to get helm release name: %w", err)
 	}
 
-	crValues, ok := cr.Object["spec"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("failed to get spec: expected map[string]interface{}")
+	var crValues map[string]interface{}
+	var ok bool
+	if spec, hasSpec := cr.Object["spec"]; hasSpec {
+		crValues, ok = spec.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("failed to get spec: expected map[string]interface{}")
+		}
+	} else if data, hasData := cr.Object["data"]; hasData {
+		var dataValue map[string]interface{}
+		dataValue, ok = data.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("failed to get data: expected expected map[string]interface{}")
+		}
+		values, ok := dataValue["values"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to get data.values: expected string")
+		}
+		crValues = make(map[string]interface{})
+		err = yaml.Unmarshal([]byte(values), crValues)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse data.values as yaml: %w", err)
+		}
+	} else {
+		return nil, fmt.Errorf("invalid CR object: %v", cr.Object)
 	}
 
 	expOverrides, err := parseOverrides(overrideValues)

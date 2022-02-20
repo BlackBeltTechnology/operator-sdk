@@ -15,10 +15,32 @@
 package controller
 
 import (
-	"testing"
-
+	"context"
+	. "github.com/onsi/ginkgo"
+	"github.com/operator-framework/operator-sdk/internal/helm/release"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v3"
+	rpb "helm.sh/helm/v3/pkg/release"
+	"io/ioutil"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/record"
+	"os"
+	"path"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"testing"
+	"time"
 )
 
 func TestHasAnnotation(t *testing.T) {
@@ -138,5 +160,187 @@ func annotations(m map[string]interface{}) *unstructured.Unstructured {
 				"annotations": m,
 			},
 		},
+	}
+}
+func newManager() (manager.Manager, error) {
+
+	mgr, err := manager.New(cfg, manager.Options{})
+	if err != nil {
+		return nil, err
+	}
+	log.Info("created manager", "manager", mgr)
+	return mgr, nil
+}
+
+var testenv *envtest.Environment
+var cfg *rest.Config
+var clientset *kubernetes.Clientset
+
+func startK() error {
+
+	testenv = &envtest.Environment{}
+	cwd, _ := os.Getwd()
+	testenv.BinaryAssetsDirectory = cwd + "/../../../tools/bin/k8s/1.21.2-linux-amd64"
+	log.Info("cwd: ", "msg", cwd)
+
+	var err error
+	cfg, err = testenv.Start()
+	if err != nil {
+		return err
+	}
+	clientset, err = kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	// Prevent the metrics listener being created
+	metrics.DefaultBindAddress = "0"
+
+	return nil
+}
+
+func setup(tb *testing.T) func(tb *testing.T) {
+	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+	logf.Log.Info("setup suite")
+	err := startK()
+	if err != nil {
+		tb.Fatalf("cannot start kube: %v", err)
+	}
+
+	// Return a function to teardown the test
+	return func(tb *testing.T) {
+		logf.Log.Info("teardown suite")
+		err := testenv.Stop()
+		if err != nil {
+			tb.Fatalf("cannot stop kube: %v", err)
+		}
+		metrics.DefaultBindAddress = ":8080"
+
+	}
+}
+
+func TestHelmOperatorReconciler_Reconcile(t *testing.T) {
+	tearDown := setup(t)
+	defer tearDown(t)
+	gvk := schema.GroupVersionKind{
+		Kind:    "ConfigMap",
+		Group:   "",
+		Version: "v1",
+	}
+	// create and return configmap object
+	pathPrefix := "../../../testdata/helm/configmap"
+	overrideFileName := "values-override.yaml"
+	content, err := ioutil.ReadFile(path.Join(pathPrefix, overrideFileName))
+	if err != nil {
+		t.Fatalf("cannot load valuesoverride file: %v", err)
+	}
+	values := make(map[string]interface{})
+	err = yaml.Unmarshal(content, values)
+	if err != nil {
+		t.Fatalf("values-override.yaml yaml error: %v", err)
+	}
+	mmm, err := yaml.Marshal(values)
+	cfgmap := &v1.ConfigMap{
+
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "foo",
+			Labels:    map[string]string{"app": "foo"},
+		},
+		Data: map[string]string{"values": string(mmm)},
+	}
+	marshalled, err := yaml.Marshal(cfgmap)
+
+	t.Logf("cfgmap: \n%s", marshalled)
+	_, err = clientset.CoreV1().ConfigMaps(cfgmap.GetNamespace()).Create(context.Background(), cfgmap, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create test configmap: %v", err)
+	}
+
+	mgr, errr := newManager()
+	if errr != nil {
+		t.Fatalf("failed to create controller-manager: %v", errr)
+	}
+	type fields struct {
+		Client          client.Client
+		EventRecorder   record.EventRecorder
+		GVK             schema.GroupVersionKind
+		ManagerFactory  release.ManagerFactory
+		ReconcilePeriod time.Duration
+		OverrideValues  map[string]string
+		releaseHook     ReleaseHookFunc
+	}
+	type args struct {
+		ctx     context.Context
+		request reconcile.Request
+	}
+	reconcilePeriod := 5 * time.Second
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    reconcile.Result
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{name: "configmap test",
+			fields: fields{
+				Client:          mgr.GetClient(),
+				EventRecorder:   mgr.GetEventRecorderFor(gvk.Kind),
+				GVK:             gvk,
+				ManagerFactory:  release.NewManagerFactory(mgr, "../../../testdata/helm/configmap/helm-chart"),
+				ReconcilePeriod: reconcilePeriod,
+				OverrideValues:  map[string]string{},
+				releaseHook: func(r *rpb.Release) error {
+					return nil
+				},
+			}, args: args{
+				ctx: context.TODO(),
+				request: reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      cfgmap.GetName(),
+						Namespace: cfgmap.GetNamespace(),
+					},
+				},
+			}, want: reconcile.Result{
+				Requeue:      false,
+				RequeueAfter: reconcilePeriod,
+			}, wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if err != nil {
+					t.Errorf("bogus reconcile")
+				}
+				return err != nil
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := HelmOperatorReconciler{
+				Client:          tt.fields.Client,
+				EventRecorder:   tt.fields.EventRecorder,
+				GVK:             tt.fields.GVK,
+				ManagerFactory:  tt.fields.ManagerFactory,
+				ReconcilePeriod: tt.fields.ReconcilePeriod,
+				OverrideValues:  tt.fields.OverrideValues,
+				releaseHook:     tt.fields.releaseHook,
+			}
+			got, err := r.Reconcile(tt.args.ctx, tt.args.request)
+			//if !tt.wantErr(t, err, fmt.Sprintf("Reconcile(%v, %v)", tt.args.ctx, tt.args.request)) {
+			//	return
+			//}
+			if err != nil {
+				t.Fatalf("bogus reconcile: %v", err)
+			}
+			assert.Equalf(t, tt.want, got, "Reconcile(%v, %v)", tt.args.ctx, tt.args.request)
+			var updated *v1.ConfigMap
+			updated, err = clientset.CoreV1().ConfigMaps(cfgmap.Namespace).Get(context.Background(), cfgmap.Name, metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("cannot get cfgmap back: %v", err)
+			}
+			assert.Contains(t, updated.Annotations, "deploymentStatus")
+			if content, err := yaml.Marshal(updated); err == nil {
+				t.Logf("updated: \n%s", content)
+			} else {
+				t.Fatalf("cannot render updated: %v", err)
+			}
+
+		})
 	}
 }

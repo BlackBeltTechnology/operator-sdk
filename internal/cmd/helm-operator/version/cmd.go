@@ -39,6 +39,6 @@ func run() {
 	if version == "unknown" {
 		version = ver.Version
 	}
-	fmt.Printf("helm-operator version: %q, commit: %q, kubernetes version: %q, go version: %q, GOOS: %q, GOARCH: %q\n",
+	fmt.Printf("helm-operator (with configmap extension) version: %q, commit: %q, kubernetes version: %q, go version: %q, GOOS: %q, GOARCH: %q\n",
 		version, ver.GitCommit, ver.KubernetesVersion, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }

@@ -1,0 +1,6 @@
+# Use the 'create api' subcommand to add watches to this file.
+- group: ""
+  version: v1
+  kind: ConfigMap
+  chart: helm-chart
+#+kubebuilder:scaffold:watch

@@ -130,3 +130,8 @@ tags
 
 # Python cache (Ansible molecule)
 test/ansible/plugins/filter/__pycache__/
+
+.kubebuilder
+default.etcd
+
+

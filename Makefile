@@ -11,7 +11,7 @@ export GIT_VERSION = $(shell git describe --dirty --tags --always)
 export GIT_COMMIT = $(shell git rev-parse HEAD)
 export K8S_VERSION = 1.21
 # TODO: bump this to 1.21, after kubectl `--generator` flag is removed from e2e tests.
-export ENVTEST_K8S_VERSION = 1.21.1
+export ENVTEST_K8S_VERSION = 1.21.2
 
 # Build settings
 export TOOLS_DIR = tools/bin
@@ -146,6 +146,7 @@ test-docs: ## Test doc links
 .PHONY: test-unit
 TEST_PKGS = $(shell go list ./... | grep -v -E 'github.com/operator-framework/operator-sdk/test/')
 test-unit: ## Run unit tests
+	export KUBEBUILDER_ASSETS=$(KUBEBUILDER_ASSETS)
 	go test -coverprofile=coverage.out -covermode=count -short $(TEST_PKGS)
 
 e2e_tests := test-e2e-go test-e2e-ansible test-e2e-ansible-molecule test-e2e-helm test-e2e-integration
