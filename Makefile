@@ -91,7 +91,7 @@ IMAGE_BASE_TARGET_LIST = ansible-operator ansible-operator-2.11-preview
 image-build-base: $(foreach i,$(IMAGE_BASE_TARGET_LIST),image-base/$(i)) ## Build all images.
 
 # Build an image.
-BUILD_IMAGE_REPO = quay.io/operator-framework
+BUILD_IMAGE_REPO = europe-west1-docker.pkg.dev/ucs-hub/ucs/operator-framework
 # When running in a terminal, this will be false. If true (ex. CI), print plain progress.
 ifneq ($(shell test -t 0; echo $$?),0)
 DOCKER_PROGRESS = --progress plain
