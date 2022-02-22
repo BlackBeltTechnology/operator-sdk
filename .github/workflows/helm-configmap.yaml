@@ -85,7 +85,7 @@ jobs:
       id: tags
       run: |
         IMG=$(cat Makefile |grep "BUILD_IMAGE_REPO = "|cut -d '=' -f2|tr -d ' ')/${{ matrix.id }}
-        echo ::set-output name=tags::$(.github/workflows/get_image_tags.sh "$IMG" "v")
+        echo ::set-output name=tags::$(echo $IMG:$(git describe --dirty --tags --always))
 
     - name: build and push
       uses: docker/build-push-action@v2
