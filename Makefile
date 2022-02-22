@@ -4,11 +4,12 @@ SHELL = /bin/bash
 # This value must be updated to the release tag of the most recent release, a change that must
 # occur in the release commit. IMAGE_VERSION will be removed once each subproject that uses this
 # version is moved to a separate repo and release process.
-export IMAGE_VERSION = v1.17.0
+
 # Build-time variables to inject into binaries
 export SIMPLE_VERSION = $(shell (test "$(shell git describe)" = "$(shell git describe --abbrev=0)" && echo $(shell git describe)) || echo $(shell git describe --abbrev=0)+git)
 export GIT_VERSION = $(shell git describe --dirty --tags --always)
 export GIT_COMMIT = $(shell git rev-parse HEAD)
+export IMAGE_VERSION = $(GIT_VERSION)
 export K8S_VERSION = 1.21
 # TODO: bump this to 1.21, after kubectl `--generator` flag is removed from e2e tests.
 export ENVTEST_K8S_VERSION = 1.21.2
